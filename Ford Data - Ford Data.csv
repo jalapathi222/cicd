@@ -1,0 +1,19 @@
+Employee,Name,Department,Dept Name,State,Model,Category,Year
+101,Jackson,1,Manufacturing,LA,Aerostar Cargo,Van/Minivan,1997
+101,Daniel,2,Fittings,SC,Aerostar Cargo,Van/Minivan,1997
+102,Peter,3,Testing,WA,Aerostar Cargo,Van/Minivan,1997
+101,Jackson,1,Manufacturing,LA,Aspire,Hatchback,2000
+102,Remo,2,Fittings,TX,Aspire,Hatchback,2000
+103,Vincent,3,Testing,ID,Aspire,Hatchback,2000
+103,Vincent,3,Testing,ID,Bronco,SUV,2021
+101,Jackson,1,Manufacturing,LA,Bronco Sport,SUV,2020
+102,Remo,2,Fittings,TX,Bronco Sport,SUV,2020
+103,Vincent,3,Testing,ID,Bronco Sport,SUV,2020
+101,Jackson,1,Manufacturing,LA,C-MAX Energi,Wagon,2000
+102,Remo,2,Fittings,TX,C-MAX Energi,Wagon,2000
+103,Vincent,3,Testing,ID,C-MAX Energi,Wagon,2000
+104,Jason,1,Manufacturing,SC,Crown Victoria,Sedan,2020
+105,Jerome,1,Manufacturing,CA,Crown Victoria,Sedan,2021
+107,Chris,2,Fittings,MI,Escape,SUV,2004
+108,Robert,3,Testing,IL,Escape,SUV,2004
+109,Chris Evans,1,Manufacturing,SC,Expedition,SUV,2021
