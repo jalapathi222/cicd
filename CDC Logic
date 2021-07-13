@@ -1,0 +1,106 @@
+----Step 1: Adding MD5 checksum column in source table.
+alter table `change-data-capture-317101.CDC_Dataset.CDC_Source` add column md5checksum bytes;
+
+----Step 2 : Updating the value for MD5checksum column.
+update `change-data-capture-317101.CDC_Dataset.CDC_Source` set 
+md5checksum= md5(concat(cast(employee as string), name, cast(department as string), dept_name,state,model,category,cast(year as string)))
+where 1=1;
+
+----Step 3: Historical load.
+-------------------- First time Historical Load ---------------------------------
+create or replace table `change-data-capture-317101.CDC_Dataset.CDC_Final`
+as 
+select * ,concat(employee,'|',Department,'|',model) as Business_Key,
+'Y' as current_record ,---> It will mark N if any updates.
+'N' as is_deleted, -----> It will mark to Y if the record is deleted.
+current_timestamp as effective_dt, -----> It will show us the created date as the current timestamp.
+cast (null as timestamp) as enddate, -----> It will update to the current timestamp if there is an update for the previous record.
+current_timestamp as last_updated_dt ----> It will update if there is any update or delete happens for a particular record.
+from `change-data-capture-317101.CDC_Dataset.CDC_Source`;
+
+----Before proceeding to step 4 we have to do step 1 & step 2 for the new source file.
+
+----Step 4: Incremental Load.
+
+call `change-data-capture-317101.CDC_Dataset.sp_cdc`();
+
+CREATE OR REPLACE PROCEDURE `change-data-capture-317101.CDC_Dataset.sp_cdc`()
+BEGIN 
+
+MERGE INTO
+  `change-data-capture-317101.CDC_Dataset.CDC_Final` AS T
+USING
+  (
+  SELECT 
+    staging.employee,
+    staging.Name,
+    staging.Department,
+    staging.Dept_Name,staging.state,staging.model,
+    staging.category,staging.year,staging.md5checksum,
+    concat(coalesce(staging.employee,dim.employee),'|',coalesce(staging.Department,dim.department),'|',coalesce(staging.model,dim.model) ) as Business_Key,
+    'Y' as Current_Record,'N' as is_deleted,
+    current_timestamp() as effective_dt,cast (null as timestamp) as enddate,current_timestamp() as last_updated_dt,
+    CASE
+      WHEN dim.Business_Key IS NULL THEN 'INSERT'
+      WHEN concat(staging.employee,'|',staging.Department,'|',staging.model ) IS NULL THEN 'DELETE'
+      WHEN staging.md5checksum <> dim.md5checksum THEN 'UPDATE'
+  END
+    AS MergeAction
+  FROM
+    `change-data-capture-317101.CDC_Dataset.CDC_Source` staging
+  FULL JOIN (
+    SELECT
+      *
+    FROM
+      `change-data-capture-317101.CDC_Dataset.CDC_Final`
+    WHERE enddate is null) AS dim
+  ON
+    concat(staging.employee,'|',staging.Department,'|',staging.model ) = dim.Business_Key
+  UNION ALL
+  SELECT
+    staging.employee,
+    staging.Name,
+    staging.Department,
+    staging.Dept_Name,staging.state,staging.model,
+    staging.category,staging.year,staging.md5checksum,concat(staging.employee,'|',staging.Department,'|',staging.model ) as Business_Key,
+    'Y' as Current_Record,'N' as is_deleted,
+    current_timestamp() as effective_dt,cast (null as timestamp) as enddate,current_timestamp() as last_updated_dt,
+    'INSERT' as MergeAction
+  FROM
+    `change-data-capture-317101.CDC_Dataset.CDC_Source` staging
+  INNER JOIN
+    `change-data-capture-317101.CDC_Dataset.CDC_Final` dim
+  ON
+    concat(staging.employee,'|',staging.Department,'|',staging.model ) = dim.Business_Key
+    AND dim.enddate is null
+    AND dim.md5checksum <> staging.md5checksum ) AS S
+ON
+  T.Business_key = S.Business_key
+  AND S.MergeAction IN ('UPDATE','DELETE')
+  WHEN MATCHED AND S.MergeAction = 'UPDATE' THEN UPDATE SET EndDate = current_timestamp() ,current_record='N',last_updated_dt=current_timestamp() 
+  WHEN MATCHED AND S.MergeAction = 'DELETE' THEN UPDATE SET EndDate = current_timestamp() ,is_deleted='Y',last_updated_dt=current_timestamp() 
+  WHEN NOT MATCHED BY TARGET
+  AND S.MergeAction='INSERT' THEN
+INSERT
+  (
+    employee,
+    Name,
+    Department,
+    Dept_Name,state,model,
+    Category,year,md5checksum,Business_key,current_record,is_deleted,effective_dt,enddate,last_updated_dt
+  )
+  VALUES 
+  (
+    S.employee,
+    S.Name,
+    S.Department,
+    S.Dept_Name,S.state,S.model,
+    S.Category,S.year,S.md5checksum,
+    S.Business_Key,
+    S.current_record,
+    S.is_deleted,
+    S.effective_dt,
+    S.enddate,
+    S.last_updated_dt
+  );
+  END;
