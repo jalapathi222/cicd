@@ -1,0 +1,73 @@
+Only thing we need to change is below 5 values accordingly.
+
+src_table="CDC_Dataset.CDC_Source_new";
+tgt_table="CDC_Dataset.CDC_Final_new";
+md5="md5(concat(cast(employee as string), name, cast(department as string), dept_name,state,model,category,cast(year as string)))";
+bkey="concat(employee,'|',Department,'|',model)";
+cdc_temp_table="CDC_Dataset.cdc_table";
+
+After setting these values we can run below queries without changing anything
+
+-------Historical Load------------------ 
+
+bq query --use_legacy_sql=false "alter table $src_table add column md5checksum bytes";
+bq query --use_legacy_sql=false "alter table $src_table add column Business_Key string"; 
+bq query --use_legacy_sql=false "update $src_table set md5checksum= $md5,
+business_key=cast($bkey as string) where 1=1";
+bq query --use_legacy_sql=false "create or replace table $tgt_table as select * ,
+'Y' as current_record ,
+'N' as is_deleted,
+current_timestamp as effective_dt,
+cast (null as timestamp) as enddate,
+current_timestamp as last_updated_dt
+from $src_table";
+
+-----------Incremental Load -------------
+
+bq query --use_legacy_sql=false "Drop table $src_table";
+
+bq query --use_legacy_sql=false "alter table $src_table add column md5checksum bytes";
+bq query --use_legacy_sql=false "alter table $src_table add column Business_Key string";
+bq query --use_legacy_sql=false "update $src_table set md5checksum= $md5,
+business_key=cast($bkey as string) where 1=1";
+bq query --use_legacy_sql=false "create table  $cdc_temp_table as (SELECT   staging.*,
+'Y' as Current_Record,
+'N' as is_deleted,
+current_timestamp() as effective_dt,
+cast (null as timestamp) as enddate,
+current_timestamp() as last_updated_dt,
+concat(coalesce(cast(staging.business_key as string),cast(dim.business_key as string)) ) as Business_Key_new,
+CASE WHEN dim.business_key IS NULL THEN 'INSERT'
+     WHEN staging.business_key IS NULL THEN 'DELETE'
+     WHEN staging.md5checksum <> dim.md5checksum THEN 'UPDATE' END   AS MergeAction
+FROM $src_table staging
+FULL JOIN
+(SELECT * FROM  $tgt_table WHERE enddate is null) AS dim
+ON cast(staging.business_key as string) = cast(dim.Business_Key as string)
+UNION ALL
+SELECT  staging.*,
+'Y' as Current_Record,
+'N' as is_deleted,
+current_timestamp() as effective_dt,
+cast (null as timestamp) as enddate,
+current_timestamp() as last_updated_dt,
+cast(staging.Business_Key as string) as Business_Key_new,
+'INSERT' as MergeAction
+FROM   $src_table staging
+INNER JOIN  $tgt_table dim 
+ON cast(staging.business_key as string) = cast(dim.Business_Key as string)
+AND dim.enddate is null
+AND dim.md5checksum <> staging.md5checksum )";
+bq query --use_legacy_sql=false "UPDATE $tgt_table a SET EndDate = current_timestamp() ,
+current_record='N',last_updated_dt=current_timestamp()
+from $cdc_temp_table b 
+where b.MergeAction ='UPDATE' 
+and cast(a.business_key as string)=cast(b.Business_Key_new as string)" ;
+bq query --use_legacy_sql=false "UPDATE $tgt_table a SET EndDate = current_timestamp() ,
+is_deleted='Y',last_updated_dt=current_timestamp()
+from $cdc_temp_table b 
+where b.MergeAction ='DELETE' 
+and cast(a.business_key as string)=cast(b.Business_Key_new as string)" ;
+bq query --use_legacy_sql=false "Insert into $tgt_table select * except (business_key_new,MergeAction)
+from $cdc_temp_table where MergeAction ='INSERT'";
+bq query --use_legacy_sql=false "Drop table $cdc_temp_table";
